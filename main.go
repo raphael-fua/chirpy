@@ -6,7 +6,16 @@ import (
 	"log"
 	"net/http"
 	"sync/atomic"
+	"strings"
 )
+
+
+var badWords = map[string]bool {
+	"kerfuffle": true,
+	"sharbert": true,
+	"fornax": true,
+}
+
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
@@ -38,13 +47,6 @@ func main() {
 			w.Write([]byte(http.StatusText(http.StatusOK)))
 		})
 
-	// mux.HandleFunc(
-	// 	"GET /api/metrics", 
-	// 	func(w http.ResponseWriter, r *http.Request){
-	// 			w.Header().Add("Content-Type", "text/plain; charset=utf-8")
-	// 		w.WriteHeader(http.StatusOK)
-	// 		w.Write([]byte(fmt.Sprintf("Hits: %d\n", apiCfg.fileserverHits.Load())))
-	// 	})
 	mux.HandleFunc(
 		"GET /admin/metrics", 
 		func(w http.ResponseWriter, r *http.Request){
@@ -55,6 +57,10 @@ func main() {
 
 
 
+// Assuming the length validation passed
+// Be sure to match against uppercase versions of the words as well, but not punctuation. "Sharbert!" does not need to be replaced, we'll consider it a different word due to the exclamation point.
+//
+// Finally, instead of the valid boolean, your handler should always return the cleaned version of the text in a JSON response, even if nothing changed:
 
 	mux.HandleFunc(
 	    "POST /api/validate_chirp",
@@ -62,8 +68,8 @@ func main() {
             type parameter struct {
                 Body string `json:"body"`
 			}
-			type validity struct {
-				Valid bool `json:"valid"`
+			type out struct {
+				CleanBody string `json:"cleaned_body"`
 			}
 
 	        decoder := json.NewDecoder(r.Body)
@@ -79,7 +85,14 @@ func main() {
 				return
 			}
 
-			respondWithJSON(w, 200, validity{Valid: true})
+
+			words := strings.Split(param.Body, " ")
+			for i, word := range words {
+				if badWords[strings.ToLower(word)] {
+					words[i] = "****"
+				}
+			}
+			respondWithJSON(w, 200, out{CleanBody: strings.Join(words, " ")})
 		})
 
 	mux.HandleFunc(
@@ -131,6 +144,9 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 	}
 	respondWithJSON(w, code, respBody)
 }
+
+
+
 
 
 
