@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -52,6 +53,35 @@ func main() {
 			w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", apiCfg.fileserverHits.Load())))
 		})
 
+
+
+
+	mux.HandleFunc(
+	    "POST /api/validate_chirp",
+		func(w http.ResponseWriter, r *http.Request) {
+            type parameter struct {
+                Body string `json:"body"`
+			}
+			type validity struct {
+				Valid bool `json:"valid"`
+			}
+
+	        decoder := json.NewDecoder(r.Body)
+			param := parameter{}
+		    err := decoder.Decode(&param)
+		    if err != nil {
+				respondWithError(w, 500, "Error decoding parameter")
+				return
+			}
+
+			if len(param.Body) > 140 {
+				respondWithError(w, 400, "Chirp is too long")
+				return
+			}
+
+			respondWithJSON(w, 200, validity{Valid: true})
+		})
+
 	mux.HandleFunc(
 		"POST /admin/reset", 
 		func(w http.ResponseWriter, r *http.Request){
@@ -78,6 +108,29 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(dat)
+}
+
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	type errorReturnVal struct {
+		Message string `json:"error"`
+	}
+	respBody := errorReturnVal {
+        Message: msg,
+	}
+	respondWithJSON(w, code, respBody)
+}
 
 
 
