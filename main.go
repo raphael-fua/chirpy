@@ -1,12 +1,18 @@
 package main
+import _ "github.com/lib/pq"
 
 import (
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"chirpy/internal/database"
+	"database/sql"
 	"sync/atomic"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 
@@ -19,11 +25,21 @@ var badWords = map[string]bool {
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	queries *database.Queries
 }
 
 
 
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dbQueries := database.New(db)
+
+
 	const filepathRoot = "."
 	const port = "8080"
 
@@ -31,6 +47,7 @@ func main() {
 
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
+		queries: dbQueries,
 	}
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(
