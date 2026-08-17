@@ -1,18 +1,21 @@
 package main
-import _ "github.com/lib/pq"
 
 import (
+	"chirpy/internal/auth"
+	"chirpy/internal/database"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"chirpy/internal/database"
-	"database/sql"
-	"sync/atomic"
 	"strings"
+	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 
@@ -23,16 +26,26 @@ var badWords = map[string]bool {
 }
 
 
+type User struct {
+	ID uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email string `json:"email"`
+
+}
+
+
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	queries *database.Queries
+	platform string
 }
-
 
 
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal(err)
@@ -48,6 +61,7 @@ func main() {
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
 		queries: dbQueries,
+		platform: platform,
 	}
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(
@@ -72,50 +86,235 @@ func main() {
 			w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", apiCfg.fileserverHits.Load())))
 		})
 
+	
+	mux.HandleFunc(
+		"POST /api/users",
+		func(w http.ResponseWriter, r *http.Request) {
+
+            type parameters struct {
+				Email string `json:"email"`
+				Password string `json:"password"`
+			}
+
+			decoder := json.NewDecoder(r.Body)
+			params := parameters{}
+			err := decoder.Decode(&params)
+			if err != nil {
+				respondWithError(
+					w, http.StatusBadRequest, "Error decoding (client request error)")
+				return
+			}
+
+			hashedPassword, err := auth.HashPassword(params.Password)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError,
+					"problem hashing password")
+			}
+
+			userWild, err := dbQueries.CreateUser(r.Context(), params.Email)
+            if err != nil {
+				respondWithError(w, http.StatusInternalServerError,
+					"Error creating user (server failure)")
+				return
+			}
+
+			err = dbQueries.SetPassword(r.Context(), database.SetPasswordParams{
+				HashedPassword: hashedPassword,
+				ID: userWild.ID,
+			})
+
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError,
+					"problem saving hashed password to database")
+			}
+
+			userTame := User{
+				ID: userWild.ID,
+				CreatedAt: userWild.CreatedAt,
+				UpdatedAt: userWild.UpdatedAt,
+				Email: userWild.Email,
+			}
+				respondWithJSON(w, http.StatusCreated, userTame)
+		})
 
 
-// Assuming the length validation passed
-// Be sure to match against uppercase versions of the words as well, but not punctuation. "Sharbert!" does not need to be replaced, we'll consider it a different word due to the exclamation point.
-//
-// Finally, instead of the valid boolean, your handler should always return the cleaned version of the text in a JSON response, even if nothing changed:
+
 
 	mux.HandleFunc(
-	    "POST /api/validate_chirp",
+		"GET /api/chirps/{chirpID}",
 		func(w http.ResponseWriter, r *http.Request) {
-            type parameter struct {
-                Body string `json:"body"`
-			}
-			type out struct {
-				CleanBody string `json:"cleaned_body"`
+			path := r.PathValue("chirpID")
+			id, err := uuid.Parse(path)
+			if err != nil {
+				respondWithError(
+					w, http.StatusBadRequest, "Error: entered id not valid")
+				return
 			}
 
-	        decoder := json.NewDecoder(r.Body)
-			param := parameter{}
-		    err := decoder.Decode(&param)
-		    if err != nil {
+			chirp, err := dbQueries.GetOneChirp(r.Context(), id)
+			if err != nil {
+				respondWithError(
+					w, http.StatusNotFound, "Error: no chirp with that id found")
+				return
+			}
+			type outChirp struct {
+				ID uuid.UUID `json:"id"`
+				CreatedAt time.Time `json:"created_at"`
+				UpdatedAt time.Time `json:"updated_at"`
+				Body string `json:"body"`
+				UserID uuid.UUID `json:"user_id"`
+			}
+			respondWithJSON(w, http.StatusOK, outChirp{
+				ID: chirp.ID,
+				CreatedAt: chirp.CreatedAt,
+				UpdatedAt: chirp.UpdatedAt,
+				Body: chirp.Body,
+				UserID: chirp.UserID,
+			})
+		})
+	mux.HandleFunc(
+		"GET /api/chirps",
+		func(w http.ResponseWriter, r *http.Request) {
+			chirps, err := dbQueries.GetAllChirps(r.Context())
+			if err != nil {
+				respondWithError(
+					w, http.StatusInternalServerError, "Error on `GetAllChirps` call")
+				return
+			}
+			type outChirp struct {
+				ID uuid.UUID `json:"id"`
+				CreatedAt time.Time `json:"created_at"`
+				UpdatedAt time.Time `json:"updated_at"`
+				Body string `json:"body"`
+				UserID uuid.UUID `json:"user_id"`
+			}
+			outchirps := []outChirp{}
+			for _, chirp := range chirps {
+				outchirps = append(outchirps, outChirp{
+					ID: chirp.ID,
+					CreatedAt: chirp.CreatedAt,
+					UpdatedAt: chirp.UpdatedAt,
+					Body: chirp.Body,
+					UserID: chirp.UserID,
+				})
+			}
+			respondWithJSON(w, http.StatusOK, outchirps)
+		})
+
+
+	mux.HandleFunc(
+		"POST /api/login",
+		func(w http.ResponseWriter, r *http.Request) {
+			type inVals struct {
+				Email string `json:"email"`
+				Password string `json:"password"`
+			}
+			type outVals struct {
+				ID uuid.UUID `json:"id"`
+				CreatedAt time.Time `json:"created_at"`
+				UpdatedAt time.Time `json:"updated_at"`
+				Email string `json:"email"`
+			}
+
+			decoder := json.NewDecoder(r.Body)
+			invals := inVals{}
+			err := decoder.Decode(&invals)
+			if err != nil {
+				respondWithError(w, http.StatusBadRequest, "error decoding request body")
+				return
+			}
+
+			usr, err := dbQueries.GetUserByEmailAddress(r.Context(), invals.Email)
+			if err != nil {
+				respondWithError(w, http.StatusUnauthorized, "error finding email")
+				return
+			}
+			match, err := auth.CheckPasswordHash(invals.Password, usr.HashedPassword)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, 
+					"error checking password hash")
+				return
+			}
+			if !match {
+				respondWithError(w, http.StatusUnauthorized, "error wrong password")
+				return
+			}
+
+			respondWithJSON(w, http.StatusOK, outVals{
+				ID: usr.ID,
+				CreatedAt: usr.CreatedAt,
+				UpdatedAt: usr.UpdatedAt,
+				Email: usr.Email,
+			})
+		})
+
+
+	mux.HandleFunc(
+		"POST /api/chirps",
+		func(w http.ResponseWriter, r *http.Request) {
+			type inVals struct {
+				Body string `json:"body"`
+				UserID uuid.UUID `json:"user_id"`
+			}
+			type outVals struct {
+				ID uuid.UUID `json:"id"`
+				CreatedAt time.Time `json:"created_at"`
+				UpdatedAt time.Time `json:"updated_at"`
+				Body string `json:"body"`
+				UserID uuid.UUID `json:"user_id"`
+			}
+
+			decoder := json.NewDecoder(r.Body)
+			in := inVals{}
+			err := decoder.Decode(&in)
+			if err != nil {
 				respondWithError(w, 500, "Error decoding parameter")
 				return
 			}
 
-			if len(param.Body) > 140 {
+			if len(in.Body) > 140 {
 				respondWithError(w, 400, "Chirp is too long")
 				return
 			}
 
 
-			words := strings.Split(param.Body, " ")
+			words := strings.Split(in.Body, " ")
 			for i, word := range words {
 				if badWords[strings.ToLower(word)] {
 					words[i] = "****"
 				}
 			}
-			respondWithJSON(w, 200, out{CleanBody: strings.Join(words, " ")})
+
+			chirpWild, err := dbQueries.CreateChirp(
+				r.Context(), database.CreateChirpParams{
+					Body: strings.Join(words, " "),
+					UserID: in.UserID,
+				})
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError,
+					"Error creating chirp (server failure)")
+				return
+			}
+			
+			respondWithJSON(w, 201, outVals{
+				ID: chirpWild.ID,
+				CreatedAt: chirpWild.CreatedAt,
+				UpdatedAt: chirpWild.UpdatedAt,
+				Body: chirpWild.Body,
+				UserID: chirpWild.UserID,
+			})
 		})
 
 	mux.HandleFunc(
 		"POST /admin/reset", 
 		func(w http.ResponseWriter, r *http.Request){
+			if apiCfg.platform != "dev" {
+				respondWithError(
+					w, http.StatusForbidden, "reset can only be used in dev mode")
+				return
+			}
 			apiCfg.fileserverHits.Store(0)
+			dbQueries.ResetUsers(r.Context())
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("Hits reset to 0\n"))
 		})
