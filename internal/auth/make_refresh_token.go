@@ -8,9 +8,9 @@ import (
 
 
 func MakeRefreshToken() string {
-	buf := make([]byte, 32)
-	_, _  = rand.Read(buf)
-	return hex.EncodeToString(buf)
+	token := make([]byte, 32)
+	_, _  = rand.Read(token)
+	return hex.EncodeToString(token)
 }
 
 

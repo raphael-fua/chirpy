@@ -12,3 +12,5 @@ DELETE FROM users;
 SELECT *
 FROM users
 WHERE email = $1;
+
+

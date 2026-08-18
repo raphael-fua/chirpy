@@ -1,5 +1,6 @@
 package main
 
+
 import (
 	"chirpy/internal/auth"
 	"chirpy/internal/database"
@@ -200,6 +201,63 @@ func main() {
 			respondWithJSON(w, http.StatusOK, outchirps)
 		})
 
+	mux.HandleFunc(
+		"POST /api/refresh",
+		func(w http.ResponseWriter, r *http.Request) {
+			type outVals struct {
+				Token string `json:"token"`
+			}
+
+			refreshToken, err := auth.GetBearerToken(r.Header)
+			if err != nil {
+				respondWithError(w, http.StatusBadRequest, "could not find refresh token")
+				return
+			}
+			user, err := dbQueries.GetUserFromRefreshToken(r.Context(),refreshToken)
+			if err != nil {
+				respondWithError(w, http.StatusUnauthorized, "could not get user for refresh token")
+				return
+			}
+
+			accessToken, err := auth.MakeJWT(
+				user.ID,
+				apiCfg.jwtsecret,
+				time.Hour,
+			)
+			if err != nil {
+				respondWithError(w, http.StatusUnauthorized, "could not validate token")
+				return
+			}
+
+			respondWithJSON(w, http.StatusOK, outVals{
+				Token: accessToken,
+			})
+		},
+	)
+
+
+	mux.HandleFunc(
+		"POST /api/revoke",
+		func(w http.ResponseWriter, r *http.Request) {
+			type out struct {}
+			refreshToken, err := auth.GetBearerToken(r.Header)
+			if err != nil {
+				respondWithError(w, http.StatusBadRequest, "could not find refresh token")
+				return
+			}
+
+			_, err = dbQueries.RevokeRefreshToken(r.Context(), refreshToken)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, "could not revoked session")
+				return
+			}
+
+			respondWithJSON(w, http.StatusNoContent, out{})
+		},
+	)
+
+
+
 
 	mux.HandleFunc(
 		"POST /api/login",
@@ -207,7 +265,7 @@ func main() {
 			type inVals struct {
 				Email string `json:"email"`
 				Password string `json:"password"`
-				ExpiresInSeconds *int `json:"expires_in_seconds"`
+				// ExpiresInSeconds *int `json:"expires_in_seconds"`
 			}
 			type outVals struct {
 				ID uuid.UUID `json:"id"`
@@ -217,16 +275,12 @@ func main() {
 				TokenString string `json:"token"`
 				RefreshTokenString string `json:"refresh_token"`
 			}
-			returnExpiration := 3600
 			decoder := json.NewDecoder(r.Body)
 			invals := inVals{}
 			err := decoder.Decode(&invals)
 			if err != nil {
 				respondWithError(w, http.StatusBadRequest, "error decoding request body")
 				return
-			}
-			if invals.ExpiresInSeconds != nil {
-				returnExpiration = min(returnExpiration, *invals.ExpiresInSeconds)
 			}
 			usr, err := dbQueries.GetUserByEmailAddress(r.Context(), invals.Email)
 			if err != nil {
@@ -244,10 +298,22 @@ func main() {
 				return
 			}
 			tokenString, err := auth.MakeJWT(
-				usr.ID, apiCfg.jwtsecret, time.Duration(returnExpiration) * time.Second)
+				usr.ID, apiCfg.jwtsecret, time.Duration(3600) * time.Second)
 			if err != nil {
 				respondWithError(w, http.StatusInternalServerError,
 					"error creating token string")
+				return
+			}
+			t1 := time.Now()
+			t2 := t1.Add(time.Hour * 24 * 60)
+			refreshToken, err := dbQueries.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+				Token: auth.MakeRefreshToken(),
+				UserID: usr.ID,
+				ExpiresAt: t2,
+			})
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError,
+					"error creating refresh token string")
 				return
 			}
 			respondWithJSON(w, http.StatusOK, outVals{
@@ -256,6 +322,7 @@ func main() {
 				UpdatedAt: usr.UpdatedAt,
 				Email: usr.Email,
 				TokenString: tokenString,
+				RefreshTokenString: refreshToken.Token,
 			})
 		})
 
