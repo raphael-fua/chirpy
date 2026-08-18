@@ -215,6 +215,7 @@ func main() {
 				UpdatedAt time.Time `json:"updated_at"`
 				Email string `json:"email"`
 				TokenString string `json:"token"`
+				RefreshTokenString string `json:"refresh_token"`
 			}
 			returnExpiration := 3600
 			decoder := json.NewDecoder(r.Body)
