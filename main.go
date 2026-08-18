@@ -39,19 +39,15 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	queries *database.Queries
 	platform string
+	jwtsecret string
 }
 
 
 func main() {
 	godotenv.Load()
-	dbURL := os.Getenv("DB_URL")
-	platform := os.Getenv("PLATFORM")
-	db, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		log.Fatal(err)
-	}
+	db, err := sql.Open("postgres", os.Getenv("DB_URL"))
+	if err != nil { log.Fatal(err) }
 	dbQueries := database.New(db)
-
 
 	const filepathRoot = "."
 	const port = "8080"
@@ -61,7 +57,8 @@ func main() {
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
 		queries: dbQueries,
-		platform: platform,
+		platform:os.Getenv("PLATFORM"),
+		jwtsecret: os.Getenv("JWT_SECRET"),
 	}
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(
@@ -172,6 +169,8 @@ func main() {
 				UserID: chirp.UserID,
 			})
 		})
+
+
 	mux.HandleFunc(
 		"GET /api/chirps",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -208,14 +207,16 @@ func main() {
 			type inVals struct {
 				Email string `json:"email"`
 				Password string `json:"password"`
+				ExpiresInSeconds *int `json:"expires_in_seconds"`
 			}
 			type outVals struct {
 				ID uuid.UUID `json:"id"`
 				CreatedAt time.Time `json:"created_at"`
 				UpdatedAt time.Time `json:"updated_at"`
 				Email string `json:"email"`
+				TokenString string `json:"token"`
 			}
-
+			returnExpiration := 3600
 			decoder := json.NewDecoder(r.Body)
 			invals := inVals{}
 			err := decoder.Decode(&invals)
@@ -223,7 +224,9 @@ func main() {
 				respondWithError(w, http.StatusBadRequest, "error decoding request body")
 				return
 			}
-
+			if invals.ExpiresInSeconds != nil {
+				returnExpiration = min(returnExpiration, *invals.ExpiresInSeconds)
+			}
 			usr, err := dbQueries.GetUserByEmailAddress(r.Context(), invals.Email)
 			if err != nil {
 				respondWithError(w, http.StatusUnauthorized, "error finding email")
@@ -239,12 +242,19 @@ func main() {
 				respondWithError(w, http.StatusUnauthorized, "error wrong password")
 				return
 			}
-
+			tokenString, err := auth.MakeJWT(
+				usr.ID, apiCfg.jwtsecret, time.Duration(returnExpiration) * time.Second)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError,
+					"error creating token string")
+				return
+			}
 			respondWithJSON(w, http.StatusOK, outVals{
 				ID: usr.ID,
 				CreatedAt: usr.CreatedAt,
 				UpdatedAt: usr.UpdatedAt,
 				Email: usr.Email,
+				TokenString: tokenString,
 			})
 		})
 
@@ -252,9 +262,19 @@ func main() {
 	mux.HandleFunc(
 		"POST /api/chirps",
 		func(w http.ResponseWriter, r *http.Request) {
+			tokenString, err := auth.GetBearerToken(r.Header)
+			if err != nil {
+				respondWithError(w, http.StatusUnauthorized, "error getting token string")
+				return
+			}
+			userID, err := auth.ValidateJWT(tokenString, apiCfg.jwtsecret)
+			if err != nil {
+				respondWithError(w, http.StatusUnauthorized, "error invalid JWT")
+				return
+			}
 			type inVals struct {
 				Body string `json:"body"`
-				UserID uuid.UUID `json:"user_id"`
+				// UserID uuid.UUID `json:"user_id"`
 			}
 			type outVals struct {
 				ID uuid.UUID `json:"id"`
@@ -263,39 +283,33 @@ func main() {
 				Body string `json:"body"`
 				UserID uuid.UUID `json:"user_id"`
 			}
-
 			decoder := json.NewDecoder(r.Body)
 			in := inVals{}
-			err := decoder.Decode(&in)
+			err = decoder.Decode(&in)
 			if err != nil {
 				respondWithError(w, 500, "Error decoding parameter")
 				return
 			}
-
 			if len(in.Body) > 140 {
 				respondWithError(w, 400, "Chirp is too long")
 				return
 			}
-
-
 			words := strings.Split(in.Body, " ")
 			for i, word := range words {
 				if badWords[strings.ToLower(word)] {
 					words[i] = "****"
 				}
 			}
-
 			chirpWild, err := dbQueries.CreateChirp(
 				r.Context(), database.CreateChirpParams{
 					Body: strings.Join(words, " "),
-					UserID: in.UserID,
+					UserID: userID,
 				})
 			if err != nil {
 				respondWithError(w, http.StatusInternalServerError,
 					"Error creating chirp (server failure)")
 				return
 			}
-			
 			respondWithJSON(w, 201, outVals{
 				ID: chirpWild.ID,
 				CreatedAt: chirpWild.CreatedAt,
