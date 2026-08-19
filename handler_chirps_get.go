@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/google/uuid"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +30,11 @@ func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
+    type inVals struct {
+		AuthorID string `json:"author_id"`
+	}
+	headerAuthorIDString := r.URL.Query().Get("author_id")
+
 	dbChirps, err := cfg.db.GetAllChirps(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "could not retrieve chirps")
@@ -37,6 +43,16 @@ func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Reque
 
 	chirps := []Chirp{}
 	for _, dbChirp := range dbChirps {
+		if headerAuthorIDString != "" {
+			id, err := uuid.Parse(headerAuthorIDString)
+			if err != nil {
+				respondWithError(w, http.StatusBadRequest, "could not parse author id")
+				return
+			}
+			if dbChirp.UserID != id {
+				continue
+				}
+		}
 		chirps = append(chirps, Chirp{
 			ID: dbChirp.ID,
 			CreatedAt: dbChirp.CreatedAt,
