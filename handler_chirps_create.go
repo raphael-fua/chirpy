@@ -25,6 +25,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 		Body string `json:"body"`
 	}
 
+	// * DRY
 	tokenString, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "could not find JWT")
@@ -35,6 +36,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 		respondWithError(w, http.StatusUnauthorized, "could not validate JWT")
 		return
 	}
+	// DRY *
 
 	decoder := json.NewDecoder(r.Body)
 	inputs := inVals{}

@@ -17,8 +17,6 @@ type User struct {
 	Password     string    `json:"-"`
 }
 
-
-
 func (cfg *apiConfig) handlerUsersCreate(w http.ResponseWriter, r *http.Request) {
 	type inVals struct {
 		Password string `json:"password"`

@@ -11,6 +11,22 @@ import (
 	"github.com/google/uuid"
 )
 
+const setEmail = `-- name: SetEmail :exec
+UPDATE users
+SET email = $1
+WHERE id = $2
+`
+
+type SetEmailParams struct {
+	Email string
+	ID    uuid.UUID
+}
+
+func (q *Queries) SetEmail(ctx context.Context, arg SetEmailParams) error {
+	_, err := q.db.ExecContext(ctx, setEmail, arg.Email, arg.ID)
+	return err
+}
+
 const setPassword = `-- name: SetPassword :exec
 UPDATE users
 SET hashed_password = $1
