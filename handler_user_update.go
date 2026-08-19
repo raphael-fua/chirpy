@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-func (cfg *apiConfig) handlerChangeCredentials(
+func (cfg *apiConfig) handlerUserUpdate(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -33,7 +33,7 @@ func (cfg *apiConfig) handlerChangeCredentials(
 	decoder := json.NewDecoder(r.Body)
 	err = decoder.Decode(&inputs)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "could not decode inputs")
+		respondWithError(w, http.StatusInternalServerError, "could not decode inputs")
 		return
 	}
 
@@ -56,11 +56,9 @@ func (cfg *apiConfig) handlerChangeCredentials(
 		ID: userID,
 	})
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "could not set password")
+		respondWithError(w, http.StatusInternalServerError, "could not set email")
 		return
 	}
-
-
 	
 	type outVals struct {
 		User

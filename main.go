@@ -67,11 +67,12 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", cfg.handlerRevoke)
 	
 	mux.HandleFunc("POST /api/users", cfg.handlerUsersCreate)
-	mux.HandleFunc("PUT /api/users", cfg.handlerChangeCredentials)
+	mux.HandleFunc("PUT /api/users", cfg.handlerUserUpdate)
 
 	mux.HandleFunc("POST /api/chirps", cfg.handlerChirpsCreate)
 	mux.HandleFunc("GET /api/chirps", cfg.handlerChirpsRetrieve)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.handlerChirpGet)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.handlerChirpDelete)
 
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
 	mux.HandleFunc("GET /admin/metrics", cfg.handlerMetrics)
