@@ -71,6 +71,7 @@ func (cfg *apiConfig) handlerUserUpdate(
 	respondWithJSON(w, http.StatusOK, outVals{
 		User: User{
 			ID: usr.ID,
+			IsChirpyRed: usr.IsChirpyRed,
 			CreatedAt: usr.CreatedAt,
 			UpdatedAt: usr.UpdatedAt,
 			Email: usr.Email,
