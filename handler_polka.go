@@ -1,12 +1,24 @@
 package main
 
 import (
+	"chirpy/internal/auth"
 	"encoding/json"
-	"github.com/google/uuid"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 func (cfg *apiConfig) handlerPolka(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "could not api key in header")
+		return
+	}
+	if cfg.apiKey != apiKey {
+		respondWithError(w, http.StatusUnauthorized, "wrong api key")
+		return
+	}
+
 	type dataStruct struct {
 		UserID uuid.UUID `json:"user_id"`
 	}
@@ -17,7 +29,7 @@ func (cfg *apiConfig) handlerPolka(w http.ResponseWriter, r *http.Request) {
 
 	inputs := inVals{}
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&inputs)
+	err = decoder.Decode(&inputs)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "could not decode request body")
 		return
