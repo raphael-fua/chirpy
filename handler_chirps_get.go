@@ -1,9 +1,9 @@
 package main
 
 import (
-	"net/http"
-
 	"github.com/google/uuid"
+	"net/http"
+	"sort"
 )
 
 func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
@@ -30,10 +30,11 @@ func (cfg *apiConfig) handlerChirpGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
-    type inVals struct {
-		AuthorID string `json:"author_id"`
-	}
 	headerAuthorIDString := r.URL.Query().Get("author_id")
+	headerSortString := r.URL.Query().Get("sort")
+	if headerSortString == "" {
+		headerSortString = "asc"
+	}
 
 	dbChirps, err := cfg.db.GetAllChirps(r.Context())
 	if err != nil {
@@ -44,14 +45,14 @@ func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Reque
 	chirps := []Chirp{}
 	for _, dbChirp := range dbChirps {
 		if headerAuthorIDString != "" {
-			id, err := uuid.Parse(headerAuthorIDString)
+			headerAuthorID, err := uuid.Parse(headerAuthorIDString)
 			if err != nil {
 				respondWithError(w, http.StatusBadRequest, "could not parse author id")
 				return
 			}
-			if dbChirp.UserID != id {
+			if dbChirp.UserID != headerAuthorID {
 				continue
-				}
+			}
 		}
 		chirps = append(chirps, Chirp{
 			ID: dbChirp.ID,
@@ -60,6 +61,19 @@ func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Reque
 			UserID: dbChirp.UserID,
 			Body: dbChirp.Body,
 		})
+	}
+
+	if headerSortString == "asc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+		})
+	} else if headerSortString == "desc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[j].CreatedAt.Before(chirps[i].CreatedAt)
+		})
+	} else {
+		respondWithError(w, http.StatusBadRequest, "neither asc nor desc")
+		return
 	}
 
 	respondWithJSON(w, http.StatusOK, chirps)
